@@ -17,10 +17,16 @@ const wordFrom = (letters: string) =>
   fc.array(fc.constantFrom(...letters), { minLength: 5, maxLength: 5 }).map(cs => cs.join(''));
 // const word = wordFrom(ALPHABET)
 const word = wordFrom('ABC');
+const uniqueWord = fc
+  .shuffledSubarray([...ALPHABET], { minLength: 5, maxLength: 5 })
+  .map(cs => cs.join(''));
+
+const swapAandB = (word: string) =>
+  [...word].map(letter => (letter === 'A' ? 'B' : letter === 'B' ? 'A' : letter)).join('');
 
 describe('matchGuess', () => {
 
-  // Property: invaraint
+  // Pattern: invariant. The result always has one color per guess letter.
   it('returns exactly five colors', () => {
     fc.assert(
       fc.property(word, word, (secret, guess) => {
@@ -29,7 +35,7 @@ describe('matchGuess', () => {
     );
   });
 
-  // Property: invariant
+  // Pattern: invariant. Every result color is a valid Wordle color.
   it('only uses the colors G, Y, B', () => {
     fc.assert(
       fc.property(word, word, (secret, guess) => {
@@ -38,7 +44,7 @@ describe('matchGuess', () => {
     );
   });
 
-  // Property: conditional
+  // Pattern: conditional. Guessing the secret gives all greens.
   it('guessing the secret gives all greens', () => {
     fc.assert(
       fc.property(word, w => {
@@ -47,7 +53,7 @@ describe('matchGuess', () => {
     );
   });
 
-  // Property: invariant
+  // Pattern: invariant. A letter is never credited more than it occurs in the secret.
   it('never credits a letter more times than the secret contains it', () => {
     fc.assert(
       fc.property(word, word, (secret, guess) => {
@@ -57,6 +63,25 @@ describe('matchGuess', () => {
           const inSecret = [...secret].filter(c => c === letter).length;
           expect(credited).toBeLessThanOrEqual(inSecret);
         }
+      }),
+    );
+  });
+
+  // Pattern: conditional. A cyclic shift of five distinct letters gives all yellows.
+  it('marks every letter yellow when a distinct-letter word is cyclically shifted', () => {
+    fc.assert(
+      fc.property(uniqueWord, secret => {
+        const guess = secret.slice(1) + secret[0];
+        expect(matchGuess(secret, guess)).toEqual(['Y', 'Y', 'Y', 'Y', 'Y']);
+      }),
+    );
+  });
+
+  // Pattern: metamorphic. Renaming A and B in both words preserves the colors.
+  it('is unchanged by consistently swapping two letter names', () => {
+    fc.assert(
+      fc.property(wordFrom(ALPHABET), wordFrom(ALPHABET), (secret, guess) => {
+        expect(matchGuess(swapAandB(secret), swapAandB(guess))).toEqual(matchGuess(secret, guess));
       }),
     );
   });

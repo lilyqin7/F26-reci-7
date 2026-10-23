@@ -10,23 +10,89 @@ import { mergeIntervals, type Interval } from '../src/intervals';
 //   // Pattern: invariant. The output is sorted.
 // (invariant, algebraic, metamorphic, differential, or conditional)
 
-// A first attempt at a generator. It has a problem: run the tests and read
-// the counterexample.
-const interval: fc.Arbitrary<Interval> = fc.tuple(fc.integer(), fc.integer());
-const intervalList = fc.array(interval);
+// Pick two endpoints, then order them. This constructs valid intervals
+// instead of discarding invalid ones with filter or fc.pre.
+const endpoint = fc.integer({ min: -30, max: 30 });
+const interval: fc.Arbitrary<Interval> = fc.tuple(endpoint, endpoint).map(([a, b]) =>
+  a <= b ? [a, b] : [b, a],
+);
+const intervalList = fc.array(interval, { maxLength: 10 });
+
+// Construct a sorted list with a nonempty gap after every interval.
+const disjointIntervalList: fc.Arbitrary<Interval[]> = fc
+  .array(fc.tuple(fc.nat(4), fc.nat(6)), { maxLength: 8 })
+  .map(parts => {
+    let nextStart = -30;
+    return parts.map(([gap, length]) => {
+      const start = nextStart + gap;
+      const end = start + length;
+      nextStart = end + 1;
+      return [start, end] as Interval;
+    });
+  });
+
+const covers = (intervals: readonly Interval[], point: number) =>
+  intervals.some(([start, end]) => start <= point && point <= end);
 
 describe('mergeIntervals', () => {
-  // Pattern: invariant. Every input interval lies inside some output interval.
-  it('every input interval lies inside some output interval', () => {
+  // Pattern: invariant. Output is sorted, disjoint, and does not contain touching intervals.
+  it('returns sorted intervals with gaps between consecutive intervals', () => {
     fc.assert(
       fc.property(intervalList, xs => {
         const out = mergeIntervals(xs);
-        const uncovered = xs.filter(([s, e]) => !out.some(([a, b]) => a <= s && e <= b));
-        expect(uncovered).toEqual([]);
+        for (let i = 0; i < out.length - 1; i++) {
+          expect(out[i][0]).toBeLessThan(out[i + 1][0]);
+          expect(out[i][1]).toBeLessThan(out[i + 1][0]);
+        }
       }),
     );
   });
 
-  // Add your properties here. Aim for at least one of each pattern:
-  // invariant, algebraic, metamorphic, differential, conditional.
+  // Pattern: invariant. Merging does not modify the input array or its interval pairs.
+  it('does not mutate its input', () => {
+    fc.assert(
+      fc.property(intervalList, xs => {
+        const before = xs.map(([start, end]) => [start, end] as Interval);
+        mergeIntervals(xs);
+        expect(xs).toEqual(before);
+      }),
+    );
+  });
+
+  // Pattern: differential. Input and output cover exactly the same points.
+  it('preserves whether a point is covered', () => {
+    fc.assert(
+      fc.property(intervalList, endpoint, (xs, point) => {
+        expect(covers(mergeIntervals(xs), point)).toBe(covers(xs, point));
+      }),
+    );
+  });
+
+  // Pattern: metamorphic. Reversing the input order does not change the merged result.
+  it('is unaffected by input order', () => {
+    fc.assert(
+      fc.property(intervalList, xs => {
+        expect(mergeIntervals([...xs].reverse())).toEqual(mergeIntervals(xs));
+      }),
+    );
+  });
+
+  // Pattern: algebraic. Merging an already merged list changes nothing.
+  it('is idempotent', () => {
+    fc.assert(
+      fc.property(intervalList, xs => {
+        const once = mergeIntervals(xs);
+        expect(mergeIntervals(once)).toEqual(once);
+      }),
+    );
+  });
+
+  // Pattern: conditional. A sorted input with gaps between intervals is returned unchanged.
+  it('keeps already-disjoint intervals unchanged', () => {
+    fc.assert(
+      fc.property(disjointIntervalList, xs => {
+        expect(mergeIntervals(xs)).toEqual(xs);
+      }),
+    );
+  });
 });
